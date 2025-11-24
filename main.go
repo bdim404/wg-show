@@ -197,7 +197,11 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		if strings.HasPrefix(trimmed, "peer:") {
+		if strings.HasPrefix(trimmed, "interface:") {
+			interfaceName := strings.TrimSpace(strings.TrimPrefix(trimmed, "interface:"))
+			result.WriteString(cyan("interface: " + interfaceName))
+			result.WriteString("\n")
+		} else if strings.HasPrefix(trimmed, "peer:") {
 			publicKey := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer:"))
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			result.WriteString(indent)
