@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "1.0.6"
+const version = "1.0.7"
 
 type PeerInfo struct {
 	Nickname string
@@ -167,13 +167,18 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 			pendingComments = nil
 		} else if inPeerSection {
 			if strings.HasPrefix(line, "##") {
-				currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
+				comment := strings.TrimSpace(strings.TrimPrefix(line, "##"))
+				if !isWgParameter(comment) {
+					currentNickname = comment
+				}
 			} else if strings.HasPrefix(line, "#") {
 				comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
-				if currentNickname == "" {
-					currentNickname = comment
-				} else {
-					currentGroup = comment
+				if !isWgParameter(comment) {
+					if currentNickname == "" {
+						currentNickname = comment
+					} else {
+						currentGroup = comment
+					}
 				}
 			} else if strings.HasPrefix(line, "PublicKey") {
 				parts := strings.SplitN(line, "=", 2)
