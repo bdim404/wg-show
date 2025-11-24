@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 type PeerInfo struct {
 	Nickname string
@@ -81,36 +81,40 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		if strings.HasPrefix(line, "##") {
-			currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
-		} else if strings.HasPrefix(line, "#") {
-			comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
-			if currentNickname == "" {
-				currentNickname = comment
-			} else {
-				currentGroup = comment
-			}
-		} else if line == "[Peer]" {
+		if line == "[Peer]" {
 			inPeerSection = true
 			publicKey = ""
-		} else if strings.HasPrefix(line, "PublicKey") && inPeerSection {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				publicKey = strings.TrimSpace(parts[1])
-				if currentNickname != "" || currentGroup != "" {
-					peerMap[publicKey] = PeerInfo{
-						Nickname: currentNickname,
-						Group:    currentGroup,
-					}
-				}
-				currentNickname = ""
-				currentGroup = ""
-				inPeerSection = false
-			}
+			currentNickname = ""
+			currentGroup = ""
 		} else if line == "[Interface]" || (strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")) {
 			inPeerSection = false
 			currentNickname = ""
 			currentGroup = ""
+		} else if inPeerSection {
+			if strings.HasPrefix(line, "##") {
+				currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
+			} else if strings.HasPrefix(line, "#") {
+				comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+				if currentNickname == "" {
+					currentNickname = comment
+				} else {
+					currentGroup = comment
+				}
+			} else if strings.HasPrefix(line, "PublicKey") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					publicKey = strings.TrimSpace(parts[1])
+					if currentNickname != "" || currentGroup != "" {
+						peerMap[publicKey] = PeerInfo{
+							Nickname: currentNickname,
+							Group:    currentGroup,
+						}
+					}
+					currentNickname = ""
+					currentGroup = ""
+					inPeerSection = false
+				}
+			}
 		}
 	}
 
