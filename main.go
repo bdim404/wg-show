@@ -104,105 +104,85 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	}
 	defer file.Close()
 
-	peerMap := make(map[string]PeerInfo)
+	var lines []string
 	scanner := bufio.NewScanner(file)
-
-	var currentNickname string
-	var currentGroup string
-	var inPeerSection bool
-	var publicKey string
-	var pendingNickname string
-	var pendingGroup string
-	var persistentGroup string
-	var pendingComments []string
-
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 
-		if strings.HasPrefix(line, "##") && !inPeerSection {
-			comment := strings.TrimSpace(strings.TrimPrefix(line, "##"))
-			pendingNickname = comment
+	peerMap := make(map[string]PeerInfo)
 
-			if pendingGroup == "" && persistentGroup != "" {
-				pendingGroup = persistentGroup
-			}
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 
-			for i := len(pendingComments) - 1; i >= 0; i-- {
-				if !isWgParameter(pendingComments[i]) {
-					pendingGroup = pendingComments[i]
-					persistentGroup = pendingComments[i]
-					break
-				}
-			}
+		if line != "[Peer]" {
+			continue
+		}
 
-			pendingComments = nil
-		} else if strings.HasPrefix(line, "#") && !inPeerSection {
-			comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
-			pendingComments = append(pendingComments, comment)
+		var nickname, group string
 
-			if !isWgParameter(comment) {
-				persistentGroup = comment
-			}
+		if i > 0 {
+			prevLine := strings.TrimSpace(lines[i-1])
 
-			if pendingNickname == "" {
-				pendingNickname = comment
-			} else if pendingGroup == "" {
-				pendingGroup = comment
-			}
-		} else if line == "[Peer]" {
-			inPeerSection = true
-			publicKey = ""
-			currentNickname = pendingNickname
-			currentGroup = pendingGroup
-			pendingNickname = ""
-			pendingGroup = ""
-			pendingComments = nil
-		} else if line == "[Interface]" || (strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")) {
-			inPeerSection = false
-			currentNickname = ""
-			currentGroup = ""
-			pendingNickname = ""
-			pendingGroup = ""
-			persistentGroup = ""
-			pendingComments = nil
-		} else if inPeerSection {
-			if strings.HasPrefix(line, "##") {
-				comment := strings.TrimSpace(strings.TrimPrefix(line, "##"))
-				if !isWgParameter(comment) {
-					currentNickname = comment
-				}
-			} else if strings.HasPrefix(line, "#") {
-				comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
-				if !isWgParameter(comment) {
-					if currentNickname == "" {
-						currentNickname = comment
-					} else {
-						currentGroup = comment
+			if strings.HasPrefix(prevLine, "##") {
+				nickname = strings.TrimSpace(strings.TrimPrefix(prevLine, "##"))
+
+				for j := i - 2; j >= 0; j-- {
+					checkLine := strings.TrimSpace(lines[j])
+					if checkLine == "" {
+						continue
+					}
+					if checkLine == "[Interface]" {
+						break
+					}
+					if !strings.HasPrefix(checkLine, "#") {
+						continue
+					}
+					if strings.HasPrefix(checkLine, "##") {
+						continue
+					}
+
+					comment := strings.TrimSpace(strings.TrimPrefix(checkLine, "#"))
+					if !isWgParameter(comment) {
+						group = comment
+						break
 					}
 				}
-			} else if strings.HasPrefix(line, "PublicKey") {
-				parts := strings.SplitN(line, "=", 2)
+			} else if strings.HasPrefix(prevLine, "#") {
+				comment := strings.TrimSpace(strings.TrimPrefix(prevLine, "#"))
+				if !isWgParameter(comment) {
+					nickname = comment
+				}
+			}
+		}
+
+		for j := i + 1; j < len(lines); j++ {
+			checkLine := strings.TrimSpace(lines[j])
+
+			if strings.HasPrefix(checkLine, "PublicKey") {
+				parts := strings.SplitN(checkLine, "=", 2)
 				if len(parts) == 2 {
-					publicKey = strings.TrimSpace(parts[1])
-					if currentNickname != "" || currentGroup != "" {
+					publicKey := strings.TrimSpace(parts[1])
+					if nickname != "" || group != "" {
 						peerMap[publicKey] = PeerInfo{
-							Nickname: currentNickname,
-							Group:    currentGroup,
+							Nickname: nickname,
+							Group:    group,
 						}
 					}
-					currentNickname = ""
-					currentGroup = ""
-					inPeerSection = false
 				}
+				break
 			}
-		} else if line != "" && !strings.HasPrefix(line, "#") {
-			pendingNickname = ""
-			pendingGroup = ""
-			pendingComments = nil
+
+			if checkLine == "[Peer]" || checkLine == "[Interface]" {
+				break
+			}
 		}
 	}
 
-	return peerMap, scanner.Err()
+	return peerMap, nil
 }
 
 func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
