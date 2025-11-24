@@ -14,8 +14,9 @@ import (
 const version = "1.0.7"
 
 type PeerInfo struct {
-	Nickname string
-	Group    string
+	Nickname   string
+	Group      string
+	Maintainer string
 }
 
 func main() {
@@ -114,6 +115,7 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	}
 
 	peerMap := make(map[string]PeerInfo)
+	maintainerRe := regexp.MustCompile(`\(@(\w+)\)$`)
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
@@ -122,13 +124,18 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 			continue
 		}
 
-		var nickname, group string
+		var nickname, group, maintainer string
 
 		if i > 0 {
 			prevLine := strings.TrimSpace(lines[i-1])
 
 			if strings.HasPrefix(prevLine, "##") {
 				nickname = strings.TrimSpace(strings.TrimPrefix(prevLine, "##"))
+
+				if match := maintainerRe.FindStringSubmatch(nickname); match != nil {
+					maintainer = match[1]
+					nickname = strings.TrimSpace(maintainerRe.ReplaceAllString(nickname, ""))
+				}
 
 				for j := i - 2; j >= 0; j-- {
 					checkLine := strings.TrimSpace(lines[j])
@@ -166,10 +173,11 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 				parts := strings.SplitN(checkLine, "=", 2)
 				if len(parts) == 2 {
 					publicKey := strings.TrimSpace(parts[1])
-					if nickname != "" || group != "" {
+					if nickname != "" || group != "" || maintainer != "" {
 						peerMap[publicKey] = PeerInfo{
-							Nickname: nickname,
-							Group:    group,
+							Nickname:   nickname,
+							Group:      group,
+							Maintainer: maintainer,
 						}
 					}
 				}
@@ -192,6 +200,7 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 	green := color.New(color.FgGreen).SprintFunc()
 	cyan := color.New(color.FgCyan).SprintFunc()
 	magenta := color.New(color.FgMagenta).SprintFunc()
+	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
 
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
@@ -212,6 +221,11 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 				if info.Nickname != "" {
 					result.WriteString("  nickname: ")
 					result.WriteString(green(info.Nickname))
+					result.WriteString("\n")
+				}
+				if info.Maintainer != "" {
+					result.WriteString("  maintainer: ")
+					result.WriteString(blue(info.Maintainer))
 					result.WriteString("\n")
 				}
 				if info.Group != "" {
