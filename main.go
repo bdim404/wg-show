@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "1.0.5"
+const version = "1.0.6"
 
 type PeerInfo struct {
 	Nickname string
@@ -72,7 +72,22 @@ func isWgParameter(comment string) bool {
 		"PersistentKeepalive", "PresharedKey",
 	}
 
-	commentLower := strings.ToLower(strings.TrimSpace(comment))
+	commentTrimmed := strings.TrimSpace(comment)
+
+	if strings.Contains(commentTrimmed, "=") {
+		parts := strings.SplitN(commentTrimmed, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			keyLower := strings.ToLower(key)
+			for _, param := range wgParams {
+				if keyLower == strings.ToLower(param) {
+					return true
+				}
+			}
+		}
+	}
+
+	commentLower := strings.ToLower(commentTrimmed)
 	for _, param := range wgParams {
 		if strings.HasPrefix(commentLower, strings.ToLower(param)) {
 			return true
