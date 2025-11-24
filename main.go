@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 )
@@ -27,6 +30,7 @@ type PeerData struct {
 	Endpoint            string
 	AllowedIPs          string
 	LatestHandshake     string
+	HandshakeSeconds    int64
 	Transfer            string
 	PersistentKeepalive string
 }
@@ -42,6 +46,7 @@ func main() {
 	showTable := false
 	filterMaintainer := ""
 	filterGroup := ""
+	sortHandshake := ""
 	var wgArgs []string
 
 	for i := 1; i < len(os.Args); i++ {
@@ -66,6 +71,18 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: --filter-group requires a value\n")
 				os.Exit(1)
 			}
+		} else if os.Args[i] == "--sort-handshake" {
+			if i+1 < len(os.Args) {
+				sortHandshake = os.Args[i+1]
+				if sortHandshake != "asc" && sortHandshake != "desc" {
+					fmt.Fprintf(os.Stderr, "Error: --sort-handshake must be 'asc' or 'desc'\n")
+					os.Exit(1)
+				}
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --sort-handshake requires a value (asc or desc)\n")
+				os.Exit(1)
+			}
 		} else {
 			wgArgs = append(wgArgs, os.Args[i])
 		}
@@ -88,11 +105,11 @@ func main() {
 		peerMap, err := parseConfig(interfaceName)
 		if err == nil && len(peerMap) > 0 {
 			if showTable {
-				table := generateTableOutput(string(output), peerMap, interfaceName, filterMaintainer, filterGroup)
+				table := generateTableOutput(string(output), peerMap, interfaceName, filterMaintainer, filterGroup, sortHandshake)
 				fmt.Print(table)
 				return
 			}
-			enhanced := enhanceOutput(string(output), peerMap, filterMaintainer, filterGroup)
+			enhanced := enhanceOutput(string(output), peerMap, filterMaintainer, filterGroup, sortHandshake)
 			fmt.Print(enhanced)
 			return
 		}
@@ -249,6 +266,51 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	return peerMap, nil
 }
 
+func parseHandshakeTime(handshake string) int64 {
+	if handshake == "" {
+		return time.Now().Unix() + 999999999
+	}
+
+	var totalSeconds int64 = 0
+
+	parts := strings.Split(handshake, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+
+		if strings.Contains(part, "day") {
+			re := regexp.MustCompile(`(\d+)\s+day`)
+			if match := re.FindStringSubmatch(part); match != nil {
+				if days, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+					totalSeconds += days * 86400
+				}
+			}
+		} else if strings.Contains(part, "hour") {
+			re := regexp.MustCompile(`(\d+)\s+hour`)
+			if match := re.FindStringSubmatch(part); match != nil {
+				if hours, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+					totalSeconds += hours * 3600
+				}
+			}
+		} else if strings.Contains(part, "minute") {
+			re := regexp.MustCompile(`(\d+)\s+minute`)
+			if match := re.FindStringSubmatch(part); match != nil {
+				if minutes, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+					totalSeconds += minutes * 60
+				}
+			}
+		} else if strings.Contains(part, "second") {
+			re := regexp.MustCompile(`(\d+)\s+second`)
+			if match := re.FindStringSubmatch(part); match != nil {
+				if seconds, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+					totalSeconds += seconds
+				}
+			}
+		}
+	}
+
+	return totalSeconds
+}
+
 func shouldShowPeer(info PeerInfo, filterMaintainer string, filterGroup string) bool {
 	if filterMaintainer != "" && info.Maintainer != filterMaintainer {
 		return false
@@ -259,9 +321,32 @@ func shouldShowPeer(info PeerInfo, filterMaintainer string, filterGroup string) 
 	return true
 }
 
-func enhanceOutput(output string, peerMap map[string]PeerInfo, filterMaintainer string, filterGroup string) string {
-	var result strings.Builder
+func enhanceOutput(output string, peerMap map[string]PeerInfo, filterMaintainer string, filterGroup string, sortHandshake string) string {
+	ifaceData := parseWgOutput(output, peerMap)
 
+	var filteredPeers []PeerData
+	for _, peer := range ifaceData.Peers {
+		info := PeerInfo{
+			Nickname:   peer.Nickname,
+			Group:      peer.Group,
+			Maintainer: peer.Maintainer,
+		}
+		if shouldShowPeer(info, filterMaintainer, filterGroup) {
+			filteredPeers = append(filteredPeers, peer)
+		}
+	}
+
+	if sortHandshake == "asc" {
+		sort.Slice(filteredPeers, func(i, j int) bool {
+			return filteredPeers[i].HandshakeSeconds < filteredPeers[j].HandshakeSeconds
+		})
+	} else if sortHandshake == "desc" {
+		sort.Slice(filteredPeers, func(i, j int) bool {
+			return filteredPeers[i].HandshakeSeconds > filteredPeers[j].HandshakeSeconds
+		})
+	}
+
+	var result strings.Builder
 	yellow := color.New(color.FgYellow).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	cyan := color.New(color.FgCyan).SprintFunc()
@@ -269,63 +354,60 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo, filterMaintainer 
 	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
 
 	lines := strings.Split(output, "\n")
-	skipPeer := false
-	currentPeerLines := []string{}
-
-	for i, line := range lines {
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
-		if strings.HasPrefix(trimmed, "interface:") {
-			interfaceName := strings.TrimSpace(strings.TrimPrefix(trimmed, "interface:"))
-			result.WriteString(cyan("interface: " + interfaceName))
+		if strings.HasPrefix(trimmed, "interface:") || strings.HasPrefix(trimmed, "public key:") ||
+			strings.HasPrefix(trimmed, "private key:") || strings.HasPrefix(trimmed, "listening port:") ||
+			strings.HasPrefix(trimmed, "fwmark:") {
+			if strings.HasPrefix(trimmed, "interface:") {
+				interfaceName := strings.TrimSpace(strings.TrimPrefix(trimmed, "interface:"))
+				result.WriteString(cyan("interface: " + interfaceName))
+			} else {
+				result.WriteString(line)
+			}
 			result.WriteString("\n")
 		} else if strings.HasPrefix(trimmed, "peer:") {
-			if len(currentPeerLines) > 0 && !skipPeer {
-				for _, peerLine := range currentPeerLines {
-					result.WriteString(peerLine)
-				}
-			}
-			currentPeerLines = []string{}
-
-			publicKey := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer:"))
-			info, exists := peerMap[publicKey]
-
-			if exists && !shouldShowPeer(info, filterMaintainer, filterGroup) {
-				skipPeer = true
-				continue
-			}
-
-			skipPeer = false
-			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-			currentPeerLines = append(currentPeerLines, indent+yellow("peer: "+publicKey)+"\n")
-
-			if exists {
-				if info.Nickname != "" {
-					currentPeerLines = append(currentPeerLines, "  nickname: "+green(info.Nickname)+"\n")
-				}
-				if info.Maintainer != "" {
-					currentPeerLines = append(currentPeerLines, "  maintainer: "+blue(info.Maintainer)+"\n")
-				}
-				if info.Group != "" {
-					currentPeerLines = append(currentPeerLines, "  group: "+magenta(info.Group)+"\n")
-				}
-			}
-		} else if skipPeer {
-			continue
-		} else if len(currentPeerLines) > 0 {
-			currentPeerLines = append(currentPeerLines, line+"\n")
-		} else {
-			result.WriteString(line)
-			if i < len(lines)-1 {
-				result.WriteString("\n")
-			}
+			break
+		} else if trimmed == "" {
+			result.WriteString("\n")
 		}
 	}
 
-	if len(currentPeerLines) > 0 && !skipPeer {
-		for _, peerLine := range currentPeerLines {
-			result.WriteString(peerLine)
+	for _, peer := range filteredPeers {
+		result.WriteString(yellow("peer: " + peer.PublicKey))
+		result.WriteString("\n")
+
+		if peer.Nickname != "" {
+			result.WriteString("  nickname: ")
+			result.WriteString(green(peer.Nickname))
+			result.WriteString("\n")
 		}
+		if peer.Maintainer != "" {
+			result.WriteString("  maintainer: ")
+			result.WriteString(blue(peer.Maintainer))
+			result.WriteString("\n")
+		}
+		if peer.Group != "" {
+			result.WriteString("  group: ")
+			result.WriteString(magenta(peer.Group))
+			result.WriteString("\n")
+		}
+		if peer.Endpoint != "" {
+			result.WriteString("  endpoint: " + peer.Endpoint + "\n")
+		}
+		if peer.AllowedIPs != "" {
+			result.WriteString("  allowed ips: " + peer.AllowedIPs + "\n")
+		}
+		if peer.LatestHandshake != "" {
+			result.WriteString("  latest handshake: " + peer.LatestHandshake + "\n")
+		}
+		if peer.Transfer != "" {
+			result.WriteString("  transfer: " + peer.Transfer + "\n")
+		}
+		if peer.PersistentKeepalive != "" {
+			result.WriteString("  persistent keepalive: " + peer.PersistentKeepalive + "\n")
+		}
+		result.WriteString("\n")
 	}
 
 	return result.String()
@@ -366,7 +448,9 @@ func parseWgOutput(output string, peerMap map[string]PeerInfo) InterfaceData {
 			} else if strings.HasPrefix(trimmed, "allowed ips:") {
 				currentPeer.AllowedIPs = strings.TrimSpace(strings.TrimPrefix(trimmed, "allowed ips:"))
 			} else if strings.HasPrefix(trimmed, "latest handshake:") {
-				currentPeer.LatestHandshake = strings.TrimSpace(strings.TrimPrefix(trimmed, "latest handshake:"))
+				handshake := strings.TrimSpace(strings.TrimPrefix(trimmed, "latest handshake:"))
+				currentPeer.LatestHandshake = handshake
+				currentPeer.HandshakeSeconds = parseHandshakeTime(handshake)
 			} else if strings.HasPrefix(trimmed, "transfer:") {
 				currentPeer.Transfer = strings.TrimSpace(strings.TrimPrefix(trimmed, "transfer:"))
 			} else if strings.HasPrefix(trimmed, "persistent keepalive:") {
@@ -382,7 +466,7 @@ func parseWgOutput(output string, peerMap map[string]PeerInfo) InterfaceData {
 	return ifaceData
 }
 
-func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceName string, filterMaintainer string, filterGroup string) string {
+func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceName string, filterMaintainer string, filterGroup string, sortHandshake string) string {
 	ifaceData := parseWgOutput(output, peerMap)
 
 	var result strings.Builder
@@ -413,6 +497,16 @@ func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceNa
 		if shouldShowPeer(info, filterMaintainer, filterGroup) {
 			filteredPeers = append(filteredPeers, peer)
 		}
+	}
+
+	if sortHandshake == "asc" {
+		sort.Slice(filteredPeers, func(i, j int) bool {
+			return filteredPeers[i].HandshakeSeconds < filteredPeers[j].HandshakeSeconds
+		})
+	} else if sortHandshake == "desc" {
+		sort.Slice(filteredPeers, func(i, j int) bool {
+			return filteredPeers[i].HandshakeSeconds > filteredPeers[j].HandshakeSeconds
+		})
 	}
 
 	if len(filteredPeers) == 0 {
