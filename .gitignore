@@ -1,0 +1,4 @@
+wg-show
+wg-show-*
+*.exe
+.DS_Store

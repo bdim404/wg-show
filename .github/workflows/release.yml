@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build binaries
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o wg-show-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -o wg-show-linux-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -o wg-show-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -o wg-show-darwin-arm64 .
+
+      - name: Delete old release
+        continue-on-error: true
+        run: |
+          gh release delete v1.0.0 --yes
+          git push origin :refs/tags/v1.0.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: Release v1.0.0
+          body: |
+            Auto-generated release for wg-show v1.0.0
+
+            Built from commit: ${{ github.sha }}
+          files: |
+            wg-show-linux-amd64
+            wg-show-linux-arm64
+            wg-show-darwin-amd64
+            wg-show-darwin-arm64
