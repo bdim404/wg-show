@@ -7,9 +7,11 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
-const version = "1.0.1"
+const version = "1.0.2"
 
 type PeerInfo struct {
 	Nickname string
@@ -77,19 +79,25 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	var currentGroup string
 	var inPeerSection bool
 	var publicKey string
+	var pendingComment string
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		if line == "[Peer]" {
+		if strings.HasPrefix(line, "#") && !inPeerSection {
+			pendingComment = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		} else if line == "[Peer]" {
 			inPeerSection = true
 			publicKey = ""
-			currentNickname = ""
-			currentGroup = ""
+			if pendingComment != "" {
+				currentNickname = pendingComment
+				pendingComment = ""
+			}
 		} else if line == "[Interface]" || (strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")) {
 			inPeerSection = false
 			currentNickname = ""
 			currentGroup = ""
+			pendingComment = ""
 		} else if inPeerSection {
 			if strings.HasPrefix(line, "##") {
 				currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
@@ -115,6 +123,8 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 					inPeerSection = false
 				}
 			}
+		} else if line != "" && !strings.HasPrefix(line, "#") {
+			pendingComment = ""
 		}
 	}
 
@@ -124,31 +134,41 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 	var result strings.Builder
 
+	yellow := color.New(color.FgYellow).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+	cyan := color.New(color.FgCyan).SprintFunc()
+
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		result.WriteString(line)
-		result.WriteString("\n")
-
 		trimmed := strings.TrimSpace(line)
+
 		if strings.HasPrefix(trimmed, "peer:") {
 			publicKey := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer:"))
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			result.WriteString(indent)
+			result.WriteString(yellow("peer: " + publicKey))
+			result.WriteString("\n")
+
 			if info, exists := peerMap[publicKey]; exists {
 				if info.Nickname != "" && info.Group != "" {
 					result.WriteString("  nickname: ")
-					result.WriteString(info.Nickname)
+					result.WriteString(green(info.Nickname))
 					result.WriteString(" (group: ")
-					result.WriteString(info.Group)
+					result.WriteString(cyan(info.Group))
 					result.WriteString(")\n")
 				} else if info.Nickname != "" {
 					result.WriteString("  nickname: ")
-					result.WriteString(info.Nickname)
+					result.WriteString(green(info.Nickname))
 					result.WriteString("\n")
 				} else if info.Group != "" {
 					result.WriteString("  nickname: ")
-					result.WriteString(info.Group)
+					result.WriteString(cyan(info.Group))
 					result.WriteString("\n")
 				}
 			}
+		} else {
+			result.WriteString(line)
+			result.WriteString("\n")
 		}
 	}
 
