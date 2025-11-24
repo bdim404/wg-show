@@ -1,4 +1,6 @@
+.DS_Store
+*.exe
+CLAUDE.md
 wg-show
 wg-show-*
-*.exe
-.DS_Store
+*.conf
