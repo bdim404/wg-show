@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "1.0.4"
+const version = "1.0.5"
 
 type PeerInfo struct {
 	Nickname string
@@ -98,6 +98,7 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	var publicKey string
 	var pendingNickname string
 	var pendingGroup string
+	var persistentGroup string
 	var pendingComments []string
 
 	for scanner.Scan() {
@@ -107,9 +108,14 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 			comment := strings.TrimSpace(strings.TrimPrefix(line, "##"))
 			pendingNickname = comment
 
+			if pendingGroup == "" && persistentGroup != "" {
+				pendingGroup = persistentGroup
+			}
+
 			for i := len(pendingComments) - 1; i >= 0; i-- {
 				if !isWgParameter(pendingComments[i]) {
 					pendingGroup = pendingComments[i]
+					persistentGroup = pendingComments[i]
 					break
 				}
 			}
@@ -118,6 +124,10 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 		} else if strings.HasPrefix(line, "#") && !inPeerSection {
 			comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
 			pendingComments = append(pendingComments, comment)
+
+			if !isWgParameter(comment) {
+				persistentGroup = comment
+			}
 
 			if pendingNickname == "" {
 				pendingNickname = comment
@@ -138,6 +148,7 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 			currentGroup = ""
 			pendingNickname = ""
 			pendingGroup = ""
+			persistentGroup = ""
 			pendingComments = nil
 		} else if inPeerSection {
 			if strings.HasPrefix(line, "##") {
