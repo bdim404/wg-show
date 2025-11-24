@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "1.0.3"
+const version = "1.0.4"
 
 type PeerInfo struct {
 	Nickname string
@@ -64,6 +64,23 @@ func extractInterfaceName(output string, args []string) string {
 	return ""
 }
 
+func isWgParameter(comment string) bool {
+	wgParams := []string{
+		"Address", "DNS", "MTU", "Table", "PreUp", "PostUp",
+		"PreDown", "PostDown", "SaveConfig", "FwMark", "ListenPort",
+		"PrivateKey", "PublicKey", "AllowedIPs", "Endpoint",
+		"PersistentKeepalive", "PresharedKey",
+	}
+
+	commentLower := strings.ToLower(strings.TrimSpace(comment))
+	for _, param := range wgParams {
+		if strings.HasPrefix(commentLower, strings.ToLower(param)) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	configPath := "/etc/wireguard/" + interfaceName + ".conf"
 	file, err := os.Open(configPath)
@@ -81,20 +98,30 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	var publicKey string
 	var pendingNickname string
 	var pendingGroup string
+	var pendingComments []string
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
 		if strings.HasPrefix(line, "##") && !inPeerSection {
-			if pendingNickname != "" && pendingGroup == "" {
-				pendingGroup = pendingNickname
+			comment := strings.TrimSpace(strings.TrimPrefix(line, "##"))
+			pendingNickname = comment
+
+			for i := len(pendingComments) - 1; i >= 0; i-- {
+				if !isWgParameter(pendingComments[i]) {
+					pendingGroup = pendingComments[i]
+					break
+				}
 			}
-			pendingNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
+
+			pendingComments = nil
 		} else if strings.HasPrefix(line, "#") && !inPeerSection {
 			comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+			pendingComments = append(pendingComments, comment)
+
 			if pendingNickname == "" {
 				pendingNickname = comment
-			} else {
+			} else if pendingGroup == "" {
 				pendingGroup = comment
 			}
 		} else if line == "[Peer]" {
@@ -104,12 +131,14 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 			currentGroup = pendingGroup
 			pendingNickname = ""
 			pendingGroup = ""
+			pendingComments = nil
 		} else if line == "[Interface]" || (strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")) {
 			inPeerSection = false
 			currentNickname = ""
 			currentGroup = ""
 			pendingNickname = ""
 			pendingGroup = ""
+			pendingComments = nil
 		} else if inPeerSection {
 			if strings.HasPrefix(line, "##") {
 				currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
@@ -138,6 +167,7 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 		} else if line != "" && !strings.HasPrefix(line, "#") {
 			pendingNickname = ""
 			pendingGroup = ""
+			pendingComments = nil
 		}
 	}
 
