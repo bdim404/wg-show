@@ -150,6 +150,7 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 	yellow := color.New(color.FgYellow).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	cyan := color.New(color.FgCyan).SprintFunc()
+	magenta := color.New(color.FgMagenta).SprintFunc()
 
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
@@ -167,7 +168,7 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 					result.WriteString("  nickname: ")
 					result.WriteString(green(info.Nickname))
 					result.WriteString(" (group: ")
-					result.WriteString(cyan(info.Group))
+					result.WriteString(magenta(info.Group))
 					result.WriteString(")\n")
 				} else if info.Nickname != "" {
 					result.WriteString("  nickname: ")
