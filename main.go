@@ -209,19 +209,14 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 			result.WriteString("\n")
 
 			if info, exists := peerMap[publicKey]; exists {
-				if info.Nickname != "" && info.Group != "" {
-					result.WriteString("  nickname: ")
-					result.WriteString(green(info.Nickname))
-					result.WriteString(" (group: ")
-					result.WriteString(magenta(info.Group))
-					result.WriteString(")\n")
-				} else if info.Nickname != "" {
+				if info.Nickname != "" {
 					result.WriteString("  nickname: ")
 					result.WriteString(green(info.Nickname))
 					result.WriteString("\n")
-				} else if info.Group != "" {
-					result.WriteString("  nickname: ")
-					result.WriteString(cyan(info.Group))
+				}
+				if info.Group != "" {
+					result.WriteString("  group: ")
+					result.WriteString(magenta(info.Group))
 					result.WriteString("\n")
 				}
 			}
