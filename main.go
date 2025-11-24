@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "1.0.2"
+const version = "1.0.3"
 
 type PeerInfo struct {
 	Nickname string
@@ -79,25 +79,37 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	var currentGroup string
 	var inPeerSection bool
 	var publicKey string
-	var pendingComment string
+	var pendingNickname string
+	var pendingGroup string
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		if strings.HasPrefix(line, "#") && !inPeerSection {
-			pendingComment = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		if strings.HasPrefix(line, "##") && !inPeerSection {
+			if pendingNickname != "" && pendingGroup == "" {
+				pendingGroup = pendingNickname
+			}
+			pendingNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
+		} else if strings.HasPrefix(line, "#") && !inPeerSection {
+			comment := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+			if pendingNickname == "" {
+				pendingNickname = comment
+			} else {
+				pendingGroup = comment
+			}
 		} else if line == "[Peer]" {
 			inPeerSection = true
 			publicKey = ""
-			if pendingComment != "" {
-				currentNickname = pendingComment
-				pendingComment = ""
-			}
+			currentNickname = pendingNickname
+			currentGroup = pendingGroup
+			pendingNickname = ""
+			pendingGroup = ""
 		} else if line == "[Interface]" || (strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")) {
 			inPeerSection = false
 			currentNickname = ""
 			currentGroup = ""
-			pendingComment = ""
+			pendingNickname = ""
+			pendingGroup = ""
 		} else if inPeerSection {
 			if strings.HasPrefix(line, "##") {
 				currentNickname = strings.TrimSpace(strings.TrimPrefix(line, "##"))
@@ -124,7 +136,8 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 				}
 			}
 		} else if line != "" && !strings.HasPrefix(line, "#") {
-			pendingComment = ""
+			pendingNickname = ""
+			pendingGroup = ""
 		}
 	}
 
