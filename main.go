@@ -40,6 +40,8 @@ type InterfaceData struct {
 
 func main() {
 	showTable := false
+	filterMaintainer := ""
+	filterGroup := ""
 	var wgArgs []string
 
 	for i := 1; i < len(os.Args); i++ {
@@ -48,6 +50,22 @@ func main() {
 			os.Exit(0)
 		} else if os.Args[i] == "--show-table" {
 			showTable = true
+		} else if os.Args[i] == "--filter-maintainer" {
+			if i+1 < len(os.Args) {
+				filterMaintainer = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --filter-maintainer requires a value\n")
+				os.Exit(1)
+			}
+		} else if os.Args[i] == "--filter-group" {
+			if i+1 < len(os.Args) {
+				filterGroup = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --filter-group requires a value\n")
+				os.Exit(1)
+			}
 		} else {
 			wgArgs = append(wgArgs, os.Args[i])
 		}
@@ -70,11 +88,11 @@ func main() {
 		peerMap, err := parseConfig(interfaceName)
 		if err == nil && len(peerMap) > 0 {
 			if showTable {
-				table := generateTableOutput(string(output), peerMap, interfaceName)
+				table := generateTableOutput(string(output), peerMap, interfaceName, filterMaintainer, filterGroup)
 				fmt.Print(table)
 				return
 			}
-			enhanced := enhanceOutput(string(output), peerMap)
+			enhanced := enhanceOutput(string(output), peerMap, filterMaintainer, filterGroup)
 			fmt.Print(enhanced)
 			return
 		}
@@ -231,7 +249,17 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 	return peerMap, nil
 }
 
-func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
+func shouldShowPeer(info PeerInfo, filterMaintainer string, filterGroup string) bool {
+	if filterMaintainer != "" && info.Maintainer != filterMaintainer {
+		return false
+	}
+	if filterGroup != "" && info.Group != filterGroup {
+		return false
+	}
+	return true
+}
+
+func enhanceOutput(output string, peerMap map[string]PeerInfo, filterMaintainer string, filterGroup string) string {
 	var result strings.Builder
 
 	yellow := color.New(color.FgYellow).SprintFunc()
@@ -241,7 +269,10 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
 
 	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	skipPeer := false
+	currentPeerLines := []string{}
+
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		if strings.HasPrefix(trimmed, "interface:") {
@@ -249,32 +280,51 @@ func enhanceOutput(output string, peerMap map[string]PeerInfo) string {
 			result.WriteString(cyan("interface: " + interfaceName))
 			result.WriteString("\n")
 		} else if strings.HasPrefix(trimmed, "peer:") {
-			publicKey := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer:"))
-			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-			result.WriteString(indent)
-			result.WriteString(yellow("peer: " + publicKey))
-			result.WriteString("\n")
-
-			if info, exists := peerMap[publicKey]; exists {
-				if info.Nickname != "" {
-					result.WriteString("  nickname: ")
-					result.WriteString(green(info.Nickname))
-					result.WriteString("\n")
-				}
-				if info.Maintainer != "" {
-					result.WriteString("  maintainer: ")
-					result.WriteString(blue(info.Maintainer))
-					result.WriteString("\n")
-				}
-				if info.Group != "" {
-					result.WriteString("  group: ")
-					result.WriteString(magenta(info.Group))
-					result.WriteString("\n")
+			if len(currentPeerLines) > 0 && !skipPeer {
+				for _, peerLine := range currentPeerLines {
+					result.WriteString(peerLine)
 				}
 			}
+			currentPeerLines = []string{}
+
+			publicKey := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer:"))
+			info, exists := peerMap[publicKey]
+
+			if exists && !shouldShowPeer(info, filterMaintainer, filterGroup) {
+				skipPeer = true
+				continue
+			}
+
+			skipPeer = false
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			currentPeerLines = append(currentPeerLines, indent+yellow("peer: "+publicKey)+"\n")
+
+			if exists {
+				if info.Nickname != "" {
+					currentPeerLines = append(currentPeerLines, "  nickname: "+green(info.Nickname)+"\n")
+				}
+				if info.Maintainer != "" {
+					currentPeerLines = append(currentPeerLines, "  maintainer: "+blue(info.Maintainer)+"\n")
+				}
+				if info.Group != "" {
+					currentPeerLines = append(currentPeerLines, "  group: "+magenta(info.Group)+"\n")
+				}
+			}
+		} else if skipPeer {
+			continue
+		} else if len(currentPeerLines) > 0 {
+			currentPeerLines = append(currentPeerLines, line+"\n")
 		} else {
 			result.WriteString(line)
-			result.WriteString("\n")
+			if i < len(lines)-1 {
+				result.WriteString("\n")
+			}
+		}
+	}
+
+	if len(currentPeerLines) > 0 && !skipPeer {
+		for _, peerLine := range currentPeerLines {
+			result.WriteString(peerLine)
 		}
 	}
 
@@ -332,7 +382,7 @@ func parseWgOutput(output string, peerMap map[string]PeerInfo) InterfaceData {
 	return ifaceData
 }
 
-func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceName string) string {
+func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceName string, filterMaintainer string, filterGroup string) string {
 	ifaceData := parseWgOutput(output, peerMap)
 
 	var result strings.Builder
@@ -353,7 +403,19 @@ func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceNa
 	}
 	result.WriteString("\n")
 
-	if len(ifaceData.Peers) == 0 {
+	var filteredPeers []PeerData
+	for _, peer := range ifaceData.Peers {
+		info := PeerInfo{
+			Nickname:   peer.Nickname,
+			Group:      peer.Group,
+			Maintainer: peer.Maintainer,
+		}
+		if shouldShowPeer(info, filterMaintainer, filterGroup) {
+			filteredPeers = append(filteredPeers, peer)
+		}
+	}
+
+	if len(filteredPeers) == 0 {
 		result.WriteString("No peers found.\n")
 		return result.String()
 	}
@@ -366,7 +428,7 @@ func generateTableOutput(output string, peerMap map[string]PeerInfo, interfaceNa
 	result.WriteString(white(header) + "\n")
 	result.WriteString(strings.Repeat("─", 120) + "\n")
 
-	for _, peer := range ifaceData.Peers {
+	for _, peer := range filteredPeers {
 		nickname := peer.Nickname
 		if nickname == "" {
 			nickname = peer.PublicKey[:16] + "..."
