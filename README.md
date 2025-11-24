@@ -14,6 +14,8 @@ A lightweight WireGuard utility that enhances `wg show` output with human-readab
 
 ## Installation
 
+### GitHub
+
 Download the binary for your platform from [releases](https://github.com/bdim404/wg-show/releases) and place it in your PATH:
 
 ```bash
@@ -25,6 +27,12 @@ Or build from source:
 
 ```bash
 go build -o wg-show main.go
+```
+
+### Nix flake
+
+```bash
+nix profile add github:bdim404/wg-show
 ```
 
 ## Usage
