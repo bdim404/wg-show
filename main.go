@@ -162,6 +162,11 @@ func parseConfig(interfaceName string) (map[string]PeerInfo, error) {
 				comment := strings.TrimSpace(strings.TrimPrefix(prevLine, "#"))
 				if !isWgParameter(comment) {
 					nickname = comment
+
+					if match := maintainerRe.FindStringSubmatch(nickname); match != nil {
+						maintainer = match[1]
+						nickname = strings.TrimSpace(maintainerRe.ReplaceAllString(nickname, ""))
+					}
 				}
 			}
 		}
